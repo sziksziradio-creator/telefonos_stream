@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kamera admin</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#111;color:#eee;font:15px system-ui,sans-serif}
+header{display:flex;gap:16px;align-items:center;padding:10px 16px;background:#1b1b1b;position:sticky;top:0;z-index:5}
+header span{font-size:13px;opacity:.8}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:14px;padding:14px}
+.card{background:#1c1c1c;border-radius:10px;padding:10px;border:3px solid #1c1c1c}
+.card.live{border-color:#ff1744}.card.preview{border-color:#ffab00}
+.top{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.dot{width:16px;height:16px;border-radius:50%;background:#2ecc40;flex:none}
+.top b{flex:1;font-size:17px}
+video{width:100%;aspect-ratio:16/9;background:#000;object-fit:contain;border-radius:6px;cursor:crosshair}
+.st{font:12px ui-monospace,monospace;opacity:.8;margin:6px 0;min-height:16px}
+button,select{padding:7px 10px;margin:3px 4px 0 0;border:0;border-radius:6px;background:#333;color:#fff;font-size:14px}
+button.red{background:#c62828}.cb.on{background:#0a7d3b}.cb.set{background:#e0a100;color:#000}button.grn{background:#0a7d3b}
+label{display:block;font-size:12px;opacity:.85;margin-top:8px}
+input[type=range]{width:100%}
+.ctl{margin-top:4px}
+#empty{padding:30px;opacity:.6}
+</style>
+</head>
+<body>
+<header><b>Kamera admin</b><span id="conn">…</span><span id="src"></span></header>
+<div id="grid"></div><div id="empty">Nincs online kamera. A telefonon nyisd meg a kameraoldalt.</div>
+<script src="ctl.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+let ws,pin=localStorage.getItem('pin')||'';
+const cards={};
+const cmd=(to,c)=>{if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'cmd',to,cmd:c}))};
+
+function connect(){
+  if(!pin){pin=prompt('Admin PIN')||'';localStorage.setItem('pin',pin)}
+  ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws?role=admin&pin='+encodeURIComponent(pin));
+  ws.onopen=()=>$('conn').textContent='● kapcsolódva';
+  ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.type==='cams')render(m)};
+  ws.onclose=ev=>{$('conn').textContent='○ nincs kapcsolat';if(ev.code===4001){localStorage.removeItem('pin');pin=''}setTimeout(connect,2000)};
+}
+
+function render(m){
+  const f=(on,ok)=>on?(ok?'✔':'✖ nem elérhető'):'–';
+  $('src').textContent='vMix: '+f(m.srcs.vmixOn,m.srcs.vmix)+'   OBS: '+f(m.srcs.obsOn,m.srcs.obs);
+  const names=m.cams.map(c=>c.name);
+  for(const n in cards)if(!names.includes(n)){closePc(cards[n]);cards[n].el.remove();delete cards[n]}
+  m.cams.forEach(c=>update(cards[c.name]||make(c.name),c));
+  $('empty').style.display=names.length?'none':'block';
+}
+
+function make(name){
+  const el=document.createElement('div');el.className='card';
+  el.innerHTML='<div class="top"><span class="dot"></span><b>'+name+'</b><button class="go"></button><button class="dk">Sötét</button></div><video autoplay muted playsinline></video><div class="st"></div><div class="ctl"></div>';
+  $('grid').append(el);
+  const c={name,el,v:el.querySelector('video'),st:el.querySelector('.st'),ctl:el.querySelector('.ctl'),dot:el.querySelector('.dot'),go:el.querySelector('.go'),pc:null,busy:false,k:null,streaming:false,dark:false,ui:null,S:{zoom:1,ev:0,expMode:'auto',exT:.5,iso:.3,wbMode:'auto',wbK:5000,fMode:'auto',fu:.5,A:false,B:false,sec:2}};
+  c.go.onclick=()=>cmd(name,{c:c.streaming?'stop':'start'});
+  el.querySelector('.dk').onclick=()=>{c.dark=!c.dark;cmd(name,{c:'dark',on:c.dark})};
+  c.v.onclick=e=>{ // koppintás a képre = fókusz oda
+    const v=c.v,r=v.getBoundingClientRect(),vw=v.videoWidth,vh=v.videoHeight;if(!vw)return;
+    const s=Math.min(r.width/vw,r.height/vh),dw=vw*s,dh=vh*s;
+    const x=(e.clientX-r.left-(r.width-dw)/2)/dw,y=(e.clientY-r.top-(r.height-dh)/2)/dh;
+    if(x>=0&&x<=1&&y>=0&&y<=1)cmd(name,{c:'focusAt',x,y});
+  };
+  return cards[name]=c;
+}
+
+function closePc(c){if(c.pc){try{c.pc.close()}catch(e){}c.pc=null}c.v.srcObject=null}
+
+async function whep(c){
+  c.busy=true;
+  try{
+    const pc=new RTCPeerConnection({iceServers:[]});c.pc=pc;
+    pc.addTransceiver('video',{direction:'recvonly'});
+    pc.ontrack=e=>c.v.srcObject=e.streams[0];
+    pc.onconnectionstatechange=()=>{if(['failed','closed'].includes(pc.connectionState)&&c.pc===pc)closePc(c)};
+    await pc.setLocalDescription(await pc.createOffer());
+    await new Promise(r=>{if(pc.iceGatheringState==='complete')return r();pc.onicegatheringstatechange=()=>pc.iceGatheringState==='complete'&&r();setTimeout(r,1500)});
+    const r=await fetch('/cam/'+encodeURIComponent(c.name)+'/whep',{method:'POST',headers:{'Content-Type':'application/sdp'},body:pc.localDescription.sdp});
+    if(!r.ok)throw new Error(r.status);
+    await pc.setRemoteDescription({type:'answer',sdp:await r.text()});
+  }catch(e){closePc(c)}
+  c.busy=false;
+}
+
+function update(c,d){
+  const t=d.tally||'off',s=d.status||{};
+  c.el.className='card'+(t==='live'?' live':t==='preview'?' preview':'');
+  c.dot.style.background=t==='live'?'#ff1744':t==='preview'?'#ffab00':'#2ecc40';
+  c.streaming=!!s.streaming;
+  c.go.textContent=c.streaming?'Leállít':'Indít';c.go.className='go '+(c.streaming?'red':'grn');
+  c.st.textContent=c.streaming?`${s.w}x${s.h} @ ${s.fps} fps · ${s.mbps} Mbps · kamera ${s.camfps} fps · ${s.enc||''}${s.limit&&s.limit!=='none'?' · limit: '+s.limit:''}`:'nem ad';
+  if(c.streaming&&!c.pc&&!c.busy)whep(c); if(!c.streaming&&c.pc)closePc(c);
+  const k=JSON.stringify(d.caps);if(k!==c.k){c.k=k;build(c,d.caps)}
+  if(d.state){Object.assign(c.S,d.state);c.ui&&c.ui.sync()}
+}
+
+function build(c,d){
+  const el=c.ctl;el.innerHTML='';c.ui=null;if(!d)return;
+  const n=c.name,box=document.createElement('div');el.append(box);
+  c.ui=buildCtl(box,d,c.S,ch=>{if(!ch.act)Object.assign(c.S,ch);c.ui.sync();cmd(n,{c:'ch',ch})});
+  c.ui.sync();
+  const cfg=d.cfg||{};
+  const mk=(o,v)=>{const s=document.createElement('select');s.innerHTML=o.map(x=>'<option'+(x[0]==v?' selected':'')+' value="'+x[0]+'">'+x[1]+'</option>').join('');return s};
+  const sr=mk([['1920x1080','1080p'],['1280x720','720p']],cfg.res),sf=mk([['60','60 fps'],['30','30 fps']],cfg.fps),sb=mk([['6','6 Mbps'],['10','10 Mbps'],['15','15 Mbps']],cfg.br);
+  const lab2=document.createElement('label');lab2.textContent='Minőség';el.append(lab2,sr,sf,sb);
+  [sr,sf,sb].forEach(s=>s.onchange=()=>cmd(n,{c:'cfg',res:sr.value,fps:sf.value,br:sb.value}));
+}
+connect();
+</script>
+</body>
+</html>

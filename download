@@ -1,0 +1,7 @@
+# Admin oldal PIN-je
+ADMIN_PIN=1234
+# vMix gép IP-je (üresen hagyva kikapcsolja a vMix tally-t)
+VMIX_HOST=192.168.1.20
+# OBS WebSocket (üresen hagyva kikapcsolja az OBS tally-t)
+OBS_URL=ws://192.168.1.20:4455
+OBS_PASSWORD=

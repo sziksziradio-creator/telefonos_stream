@@ -1,0 +1,20 @@
+logLevel: info
+
+rtsp: yes
+rtspAddress: :8554
+
+srt: yes
+srtAddress: :8890
+
+webrtc: yes
+webrtcAddress: 127.0.0.1:8889
+webrtcEncryption: no
+webrtcAllowOrigins: ['*']
+webrtcLocalUDPAddress: :8189
+webrtcAdditionalHosts: [192.168.1.8]
+
+hls: no
+rtmp: no
+
+paths:
+  all_others:

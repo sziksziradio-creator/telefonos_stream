@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>Kamera küldő</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#000;color:#eee;font:16px system-ui,sans-serif;overflow:hidden}
+#pv{position:fixed;inset:0;width:100%;height:100%;object-fit:contain;background:#000;touch-action:none}
+#zoom{position:fixed;z-index:20;left:50%;transform:translateX(-50%);bottom:max(14px,env(safe-area-inset-bottom));display:none;align-items:center;gap:8px;padding:8px 12px;border-radius:30px;background:rgba(0,0,0,.55);max-width:96vw}
+#zoom button{border:0;border-radius:18px;min-width:44px;height:36px;padding:0 10px;background:#333;color:#fff;font-size:15px}
+#zoom button.on{background:#0a7d3b}
+#zoom input{width:min(34vw,220px);padding:0;border:0;background:transparent}
+#zl{min-width:44px;text-align:center;font:600 14px ui-monospace,monospace}
+#burger{position:fixed;z-index:30;top:max(10px,env(safe-area-inset-top));left:max(10px,env(safe-area-inset-left));
+  width:46px;height:46px;border:0;border-radius:10px;background:rgba(0,0,0,.55);color:#fff;font-size:26px;line-height:1}
+#hud{position:fixed;z-index:20;top:max(10px,env(safe-area-inset-top));left:calc(max(10px,env(safe-area-inset-left)) + 56px);
+  font:13px/1.35 ui-monospace,monospace;white-space:pre-line;text-shadow:0 0 4px #000,0 0 2px #000;pointer-events:none}
+#hint{position:fixed;z-index:20;left:0;right:0;bottom:20px;text-align:center;font-weight:600;color:#ffd54f;text-shadow:0 0 4px #000;display:none}
+#panel{position:fixed;z-index:25;top:0;bottom:0;left:0;width:min(380px,100%);overflow-y:auto;-webkit-overflow-scrolling:touch;
+  background:rgba(18,18,18,.96);padding:calc(max(10px,env(safe-area-inset-top)) + 56px) 14px 24px;
+  transform:translateX(-100%);transition:transform .2s}
+#panel.open{transform:none}
+#cbtn{position:fixed;z-index:30;top:max(10px,env(safe-area-inset-top));right:max(10px,env(safe-area-inset-right));width:46px;height:46px;border:0;border-radius:10px;background:rgba(0,0,0,.55);color:#fff;font-size:22px}
+#cpanel{position:fixed;z-index:25;top:0;bottom:0;right:0;width:min(340px,100%);overflow-y:auto;background:rgba(18,18,18,.96);padding:calc(max(10px,env(safe-area-inset-top)) + 56px) 14px 24px;transform:translateX(100%);transition:transform .2s}
+#cpanel.open{transform:none}
+#cpanel input[type=range]{padding:0;border:0;background:transparent}
+#cpanel select{margin-top:8px}
+.cb{padding:10px 12px;border:0;border-radius:8px;background:#333;color:#fff;margin:4px 6px 0 0;font-size:15px}
+.cb.on{background:#0a7d3b}
+.cb.set{background:#e0a100;color:#000}
+#toast{position:fixed;z-index:60;left:50%;transform:translateX(-50%);bottom:90px;padding:8px 14px;border-radius:20px;background:rgba(0,0,0,.85);color:#ffd54f;font-size:14px;display:none}
+#tally{position:fixed;z-index:30;top:max(14px,env(safe-area-inset-top));left:50%;margin-left:-11px;width:22px;height:22px;border-radius:50%;border:2px solid #fff;background:#777;box-shadow:0 0 6px #000;pointer-events:none}
+#tallyb{position:fixed;inset:0;z-index:12;pointer-events:none}
+#ring{position:fixed;z-index:15;width:72px;height:72px;margin:-36px 0 0 -36px;border:2px solid #ffd54f;border-radius:50%;display:none;pointer-events:none}
+#dark{position:fixed;inset:0;z-index:50;background:#000;display:none;align-items:center;justify-content:center;color:#333;font-size:13px}
+label{display:block;margin:12px 0 3px;font-size:13px;opacity:.75}
+select,input{width:100%;padding:12px;font-size:16px;border-radius:8px;border:1px solid #555;background:#262626;color:#eee}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+button.main{width:100%;margin-top:18px;padding:14px;font-size:17px;font-weight:600;border:0;border-radius:8px;background:#0a7d3b;color:#fff}
+button.main.stop{background:#c62828}
+#st{margin-top:12px;padding:10px;background:#262626;border-radius:8px;font:13px ui-monospace,monospace;white-space:pre-line}
+</style>
+</head>
+<body>
+<video id="pv" autoplay muted playsinline></video>
+<button id="burger" aria-label="Menü">☰</button>
+<div id="hud"></div>
+<div id="hint">Fordítsd fekvőbe a telefont!</div>
+<div id="zoom"><div id="zp" style="display:flex;gap:6px"></div><input id="zs" type="range"><span id="zl">1×</span></div>
+
+<div id="tallyb"></div><div id="tally"></div>
+<button id="cbtn" aria-label="Kamera beállítások">🎛</button>
+<div id="cpanel"><label>A kamera-beállítások indítás után jelennek meg.</label></div>
+<div id="ring"></div>
+<div id="toast"></div>
+<div id="dark">Spórolás mód – koppints kétszer a visszaváltáshoz</div>
+<div id="panel">
+  <label>Kamera neve (útvonal)</label>
+  <input id="path" value="kamera1" autocapitalize="off" autocorrect="off">
+  <label>Eszköz</label>
+  <select id="dev"></select>
+  <div class="row">
+    <div><label>Felbontás</label>
+      <select id="res"><option value="1920x1080" selected>1080p</option><option value="1280x720">720p</option></select></div>
+    <div><label>FPS</label>
+      <select id="fps"><option>60</option><option>30</option></select></div>
+  </div>
+  <label>Bitráta (Mbps)</label>
+  <select id="br"><option>6</option><option selected>10</option><option>15</option></select>
+  <button class="main" id="go">Indítás</button>
+  <div id="st">Készen áll.</div>
+</div>
+
+<script src="ctl.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+let pc=null,sender=null,zmin=1,zmax=1,zcur=1,stream=null,loc=null,wake=null,running=false,timer=null,last=null;
+const saved=(()=>{try{return JSON.parse(localStorage.getItem('cfg')||'{}')}catch(e){return{}}})();
+const q=new URLSearchParams(location.search).get('cam');
+if(saved.path)$('path').value=saved.path; if(q)$('path').value=q;
+['res','fps','br'].forEach(k=>{if(saved[k])$(k).value=saved[k]});
+
+const panel=$('panel');
+$('burger').onclick=()=>panel.classList.toggle('open');
+$('pv').onclick=()=>panel.classList.remove('open');
+panel.classList.add('open');
+
+function log(t){$('st').textContent=t}
+function save(){try{localStorage.setItem('cfg',JSON.stringify({path:$('path').value,res:$('res').value,fps:$('fps').value,br:$('br').value}))}catch(e){}}
+
+async function listDevs(){
+  const d=(await navigator.mediaDevices.enumerateDevices()).filter(x=>x.kind==='videoinput');
+  const cur=$('dev').value;
+  $('dev').innerHTML=d.map((x,i)=>`<option value="${x.deviceId}">${x.label||'Kamera '+(i+1)}</option>`).join('');
+  if(cur&&d.some(x=>x.deviceId===cur))$('dev').value=cur;
+  else{const b=d.find(x=>/back|rear|environment|hátsó/i.test(x.label));if(b)$('dev').value=b.deviceId}
+}
+
+async function goFull(){
+  try{await document.documentElement.requestFullscreen({navigationUI:'hide'})}catch(e){}
+  try{await screen.orientation.lock('landscape')}catch(e){}
+}
+function leaveFull(){
+  try{screen.orientation.unlock()}catch(e){}
+  try{document.fullscreenElement&&document.exitFullscreen()}catch(e){}
+}
+
+async function getCam(){
+  const [w,h]=$('res').value.split('x').map(Number), f=+$('fps').value;
+  camNote='';
+  const v={width:{ideal:w},height:{ideal:h},frameRate:{exact:f}};
+  if($('dev').value)v.deviceId={exact:$('dev').value}; else v.facingMode={ideal:'environment'};
+  try{stream=await navigator.mediaDevices.getUserMedia({video:v,audio:false})}
+  catch(e){v.frameRate={ideal:f,min:Math.min(f,30)};camNote='a kért '+f+' fps nem elérhető';stream=await navigator.mediaDevices.getUserMedia({video:v,audio:false})}
+  const t=stream.getVideoTracks()[0]; try{t.contentHint='motion'}catch(e){}
+  {const cc=t.getCapabilities?t.getCapabilities():{},ss=t.getSettings();
+   camInfo='kamera max: '+(cc.frameRate?Math.round(cc.frameRate.max):'?')+' fps · beállított: '+Math.round(ss.frameRate||0)+' fps'+(camNote?' · '+camNote:'')}
+  $('pv').srcObject=stream;
+  await listDevs();
+  initZoom(t);initCtl(t);
+}
+
+/* ---- ZOOM (hardveres, a kamera szenzorán) ---- */
+function initZoom(t){
+  const c=t.getCapabilities?t.getCapabilities():{};
+  if(!c.zoom||c.zoom.max<=c.zoom.min){$('zoom').style.display='none';return}
+  zmin=c.zoom.min;zmax=c.zoom.max;
+  const s=$('zs');s.min=zmin;s.max=zmax;s.step=c.zoom.step||0.1;
+  const set=t.getSettings?t.getSettings():{};
+  zcur=set.zoom||Math.max(zmin,1);s.value=zcur;
+  const presets=[0.5,1,2,3,5].filter(v=>v>=zmin-0.001&&v<=zmax+0.001);
+  $('zp').innerHTML=presets.map(v=>`<button data-z="${v}">${v}×</button>`).join('');
+  [...$('zp').children].forEach(b=>b.onclick=()=>setZoom(+b.dataset.z));
+  $('zl').textContent=zcur.toFixed(1)+'×';
+  $('zoom').style.display='flex';
+}
+function setZoom(v){
+  v=Math.min(zmax,Math.max(zmin,v));zcur=v;S.zoom=v;
+  $('zs').value=v;$('zl').textContent=v.toFixed(1)+'×';
+  [...$('zp').children].forEach(b=>b.classList.toggle('on',Math.abs(+b.dataset.z-v)<0.05));
+  qa('zoom',{zoom:v});pushState();
+}
+$('zs').oninput=e=>setZoom(+e.target.value);
+let pd=0,pz=1;
+$('pv').addEventListener('touchstart',e=>{if(e.touches.length===2){pd=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);pz=zcur}},{passive:true});
+$('pv').addEventListener('touchmove',e=>{if(e.touches.length===2&&pd){
+  const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+  setZoom(pz*d/pd);e.preventDefault()}},{passive:false});
+$('pv').addEventListener('touchend',()=>{pd=0},{passive:true});
+
+/* ---- KAMERA VEZÉRLŐK: fényerő, fehéregyensúly, fókusz ---- */
+let ftimer=null,faceOn=false,fdN=0.1,fdF=10,fsl=null,rackBusy=false;
+const mem={A:null,B:null};
+function sld(label,min,max,step,val,fn,fmt){
+  const d=document.createElement('div');
+  d.innerHTML='<label>'+label+' <b></b></label><input type="range" min="'+min+'" max="'+max+'" step="'+step+'">';
+  const i=d.querySelector('input'),b=d.querySelector('b');i.value=val;b.textContent=fmt(+i.value);
+  i.oninput=()=>{b.textContent=fmt(+i.value);fn(+i.value)};
+  $('cpanel').append(d);return i;
+}
+function btns(label,items){
+  const d=document.createElement('div');d.innerHTML='<label>'+label+'</label>';
+  const bs=items.map(([t,fn])=>{const b=document.createElement('button');b.className='cb';b.textContent=t;b.onclick=()=>fn(b,bs);d.append(b);return b});
+  $('cpanel').append(d);return bs;
+}
+const sel=(b,bs)=>bs.forEach(x=>x.classList.toggle('on',x===b));
+const distU=u=>1/(1/fdN+(1/fdF-1/fdN)*u);
+const toU=d=>Math.min(1,Math.max(0,(1/d-1/fdN)/(1/fdF-1/fdN)));
+function focusU(u){S.fu=u;S.fMode='manual';qa('focus',{focusMode:'manual',focusDistance:distU(u)});pushState()}
+function curU(){const t=stream.getVideoTracks()[0],d=t.getSettings().focusDistance;return(d&&isFinite(d))?toU(d):S.fu}
+async function rack(a,b,sec){
+  if(a==null||b==null||rackBusy)return;rackBusy=true;const t0=performance.now();
+  for(;;){
+    const p=Math.min(1,(performance.now()-t0)/(sec*1000)),e=p<.5?2*p*p:1-Math.pow(-2*p+2,2)/2;
+    await focusU(a+(b-a)*e);if(p>=1)break;await new Promise(r=>setTimeout(r,25));
+  }
+  rackBusy=false;
+}
+function focusAt(x,y){qa('focus',[{focusMode:'single-shot',pointsOfInterest:[{x,y}]},{pointsOfInterest:[{x,y}]}]);S.fMode='auto';pushState()}
+function faceToggle(b){
+  if(faceOn){faceOn=false;clearInterval(ftimer);b.classList.remove('on');return}
+  if(!('FaceDetector' in window)){alert('Ez a böngésző nem támogatja az arcfelismerést. Chrome: chrome://flags, Brave: brave://flags → kapcsold be az „Experimental Web Platform features” opciót, majd indítsd újra a böngészőt.');return}
+  const det=new FaceDetector({fastMode:true,maxDetectedFaces:3});let lx=-1,ly=-1,lt=0;
+  faceOn=true;b.classList.add('on');
+  ftimer=setInterval(async()=>{
+    const v=$('pv');if(!v.videoWidth)return;
+    try{const f=await det.detect(v);if(!f.length)return;
+      const bb=f.map(x=>x.boundingBox).sort((a,b)=>b.width*b.height-a.width*a.height)[0];
+      const x=(bb.x+bb.width/2)/v.videoWidth,y=(bb.y+bb.height/2)/v.videoHeight;
+      if(Math.hypot(x-lx,y-ly)>0.07||Date.now()-lt>4000){lx=x;ly=y;lt=Date.now();focusAt(x,y)}
+    }catch(e){}
+  },500);
+}
+function initCtl(t){
+  const c=t.getCapabilities?t.getCapabilities():{},st=t.getSettings?t.getSettings():{};
+  lastCaps={c:JSON.parse(JSON.stringify(c)),st:JSON.parse(JSON.stringify(st))};
+  faceOn=false;clearInterval(ftimer);
+  Object.assign(S,{zoom:st.zoom||1,ev:st.exposureCompensation||0,expMode:'auto',exT:.5,iso:.3,wbMode:'auto',wbK:st.colorTemperature||5000,fMode:'auto',fu:.5});
+  const fd=c.focusDistance;if(fd){fdN=Math.max(fd.min||0.05,0.05);fdF=isFinite(fd.max)?Math.min(fd.max,10):10}
+  ui=buildCtl($('cpanel'),Object.assign({},lastCaps,{cfg:{fps:$('fps').value}}),S,applyCh);
+  const fb=document.createElement('div');fb.innerHTML='<label>Egyebek</label>';
+  [['Arc követés',b=>faceToggle(b)],['Spórolás mód (fekete képernyő)',()=>{$('dark').style.display='flex';$('cpanel').classList.remove('open')}]].forEach(([tx,f])=>{
+    const b=document.createElement('button');b.className='cb';b.textContent=tx;b.onclick=()=>f(b);fb.append(b)});
+  $('cpanel').append(fb);
+  sendCaps();pushState();
+}
+$('cbtn').onclick=()=>{panel.classList.remove('open');$('cpanel').classList.toggle('open')};
+$('burger').addEventListener('click',()=>$('cpanel').classList.remove('open'));
+let dt=0;$('dark').addEventListener('touchend',()=>{const n=Date.now();if(n-dt<400)$('dark').style.display='none';dt=n});
+let tp=null,multi=false;
+$('pv').addEventListener('touchstart',e=>{if(e.touches.length>1)multi=true;else{multi=false;tp={x:e.touches[0].clientX,y:e.touches[0].clientY,t:Date.now()}}},{passive:true});
+$('pv').addEventListener('touchend',e=>{
+  if(!tp||multi||e.touches.length)return;const c=e.changedTouches[0];
+  const ok=Date.now()-tp.t<300&&Math.hypot(c.clientX-tp.x,c.clientY-tp.y)<12;tp=null;if(!ok)return;
+  if(panel.classList.contains('open')||$('cpanel').classList.contains('open')){panel.classList.remove('open');$('cpanel').classList.remove('open');return}
+  if(!running)return;
+  const v=$('pv'),r=v.getBoundingClientRect(),vw=v.videoWidth,vh=v.videoHeight;if(!vw)return;
+  const sc=Math.min(r.width/vw,r.height/vh),dw=vw*sc,dh=vh*sc;
+  const x=(c.clientX-r.left-(r.width-dw)/2)/dw,y=(c.clientY-r.top-(r.height-dh)/2)/dh;
+  if(x<0||x>1||y<0||y>1)return;
+  const g=$('ring');g.style.left=c.clientX+'px';g.style.top=c.clientY+'px';g.style.display='block';setTimeout(()=>g.style.display='none',700);
+  focusAt(x,y);
+},{passive:true});
+
+/* ---- ÁLLAPOT + SOROSÍTOTT KAMERA-BEÁLLÍTÁS (legutóbbi érték nyer) ---- */
+const S={zoom:1,ev:0,expMode:'auto',exT:.5,iso:.3,wbMode:'auto',wbK:5000,fMode:'auto',fu:.5,A:false,B:false,sec:2};
+let ui=null,camInfo='',camNote='',lastToast=0,pst=0,ptm=null;
+const pend=new Map();let qrun=false;
+function toast(t){const n=Date.now();if(n-lastToast<2500)return;lastToast=n;const e=$('toast');e.textContent=t;e.style.display='block';setTimeout(()=>e.style.display='none',2500)}
+async function adv(o,quiet){
+  const t=stream&&stream.getVideoTracks()[0];if(!t)return false;
+  try{await t.applyConstraints({advanced:[o]});return true}catch(e){if(!quiet)toast(e.name+': '+Object.keys(o).join(', '));return false}
+}
+function qa(key,o){
+  pend.set(key,o);if(qrun)return;qrun=true;
+  (async()=>{
+    while(pend.size){
+      const [k,v]=pend.entries().next().value;pend.delete(k);
+      const alts=Array.isArray(v)?v:[v];let ok=false;
+      for(const o2 of alts){ok=await adv(o2,true);if(ok)break}
+      if(!ok)toast('Ezt a telefon nem támogatja: '+Object.keys(alts[0]).join(', '));
+    }
+    qrun=false;
+  })();
+}
+function pushState(){
+  ui&&ui.sync();
+  const n=Date.now();
+  if(n-pst>120){pst=n;wsSend({type:'state',data:S})}
+  else{clearTimeout(ptm);ptm=setTimeout(()=>{pst=Date.now();wsSend({type:'state',data:S})},130)}
+}
+function applyCh(ch){
+  for(const k in ch)if(k in S)S[k]=ch[k];
+  const c=(lastCaps&&lastCaps.c)||{},fps=+$('fps').value;
+  if('zoom' in ch)setZoom(ch.zoom);
+  if('ev' in ch||'expMode' in ch||'exT' in ch||'iso' in ch){
+    if(S.expMode==='manual'&&c.exposureTime){
+      const o={exposureMode:'manual',exposureTime:expTime(c,fps,S.exT)};if(c.iso)o.iso=isoVal(c,S.iso);qa('exp',o);
+    }else qa('exp',[{exposureMode:'continuous',exposureCompensation:S.ev},{exposureCompensation:S.ev}]);
+  }
+  if('wbMode' in ch||'wbK' in ch)qa('wb',S.wbMode==='auto'?{whiteBalanceMode:'continuous'}:{whiteBalanceMode:'manual',colorTemperature:S.wbK});
+  if('fMode' in ch||'fu' in ch)qa('focus',S.fMode==='auto'?{focusMode:'continuous'}:{focusMode:'manual',focusDistance:distU(S.fu)});
+  if(ch.act==='saveA'){mem.A=curU();S.A=true}
+  if(ch.act==='saveB'){mem.B=curU();S.B=true}
+  if(ch.act==='rackAB')rack(mem.A,mem.B,S.sec);
+  if(ch.act==='rackBA')rack(mem.B,mem.A,S.sec);
+  pushState();
+}
+// a küldő a kért átlagos bitrátát tartsa (a böngésző ne essen vissza alacsony becslésre)
+function boost(sdp){
+  const br=+$('br').value*1000,h=[],L=sdp.split('\r\n');
+  L.forEach(l=>{const m=l.match(/^a=rtpmap:(\d+) H264\//);if(m)h.push(m[1])});
+  return L.map(l=>{const m=l.match(/^a=fmtp:(\d+) /);return(m&&h.includes(m[1]))?l+';x-google-min-bitrate='+Math.round(br*.6)+';x-google-start-bitrate='+Math.round(br*.8):l}).join('\r\n');
+}
+
+/* ---- TÁVVEZÉRLÉS + TALLY (WebSocket a vezérlő szerverhez) ---- */
+let cws=null,cwsName='',lastCaps=null;
+function setTally(st){
+  const col={live:'#ff1744',preview:'#ffab00',off:'#2ecc40',none:'#777'}[st]||'#777';
+  $('tally').style.background=col;
+  $('tallyb').style.boxShadow=st==='live'?'inset 0 0 0 6px '+col:st==='preview'?'inset 0 0 0 4px '+col:'none';
+}
+function wsSend(o){if(cws&&cws.readyState===1)cws.send(JSON.stringify(o))}
+function sendCaps(){if(lastCaps)wsSend({type:'caps',data:{...lastCaps,cfg:{res:$('res').value,fps:$('fps').value,br:$('br').value}}})}
+function wsConnect(){
+  const name=$('path').value.trim().toLowerCase().replace(/[^a-z0-9_-]/g,'');if(!name)return;
+  if(cws&&cwsName===name&&cws.readyState<2)return;
+  try{cws&&cws.close(1000)}catch(e){}
+  cwsName=name;
+  const w=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws?role=cam');cws=w;
+  w.onopen=()=>{wsSend({type:'hello',name});sendCaps()};
+  w.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(x){return}
+    if(m.type==='tally')setTally(m.state);else if(m.type==='cmd')remote(m)};
+  w.onclose=ev=>{setTally('none');if(cws===w&&ev.code!==4000)setTimeout(()=>{if(cws===w)wsConnect()},2000)};
+}
+async function applyBr(){
+  if(!sender)return;const p=sender.getParameters();if(!p.encodings||!p.encodings.length)return;
+  p.encodings[0].maxBitrate=+$('br').value*1e6;p.encodings[0].maxFramerate=+$('fps').value;
+  try{await sender.setParameters(p)}catch(e){}
+}
+function remote(m){
+  switch(m.c){
+    case 'ch':applyCh(m.ch);break;
+    case 'focusAt':focusAt(m.x,m.y);break;
+    case 'dark':$('dark').style.display=m.on?'flex':'none';break;
+    case 'start':if(!running)start();break;
+    case 'stop':if(running)stop();break;
+    case 'cfg':
+      if(m.res)$('res').value=m.res;if(m.fps)$('fps').value=m.fps;if(m.br)$('br').value=m.br;save();
+      if(running)switchCam().then(applyBr);
+      sendCaps();break;
+  }
+}
+$('path').addEventListener('change',()=>{save();wsConnect()});
+
+/* ---- kamera/felbontás váltás adás közben ---- */
+async function switchCam(){
+  if(!running||!sender)return;
+  try{
+    stream.getTracks().forEach(t=>t.stop());
+    await getCam();
+    await sender.replaceTrack(stream.getVideoTracks()[0]);
+    log('Kamera átváltva.');
+  }catch(e){log('Váltási hiba: '+e.message)}
+}
+['dev','res','fps'].forEach(k=>$(k).addEventListener('change',()=>{save();switchCam()}));
+
+async function connect(){
+  pc=new RTCPeerConnection({iceServers:[]});
+  const t=stream.getVideoTracks()[0];
+  const tr=pc.addTransceiver(t,{direction:'sendonly'});sender=tr.sender;
+  try{
+    const caps=RTCRtpSender.getCapabilities('video').codecs;
+    const h264=caps.filter(c=>c.mimeType==='video/H264');
+    if(h264.length)tr.setCodecPreferences([...h264,...caps.filter(c=>c.mimeType!=='video/H264')]);
+  }catch(e){}
+  const p=tr.sender.getParameters(); if(!p.encodings||!p.encodings.length)p.encodings=[{}];
+  p.encodings[0].maxBitrate=+$('br').value*1e6;
+  p.encodings[0].maxFramerate=+$('fps').value;
+  p.degradationPreference='maintain-framerate';
+  try{await tr.sender.setParameters(p)}catch(e){}
+  pc.oniceconnectionstatechange=()=>{
+    if(running&&['failed','disconnected'].includes(pc.iceConnectionState)){log('Kapcsolat megszakadt, újracsatlakozás…');setTimeout(()=>running&&restart(),1500)}
+  };
+  await pc.setLocalDescription(await pc.createOffer());
+  await new Promise(r=>{if(pc.iceGatheringState==='complete')return r();
+    pc.onicegatheringstatechange=()=>pc.iceGatheringState==='complete'&&r();setTimeout(r,2000)});
+  const r=await fetch(`/cam/${encodeURIComponent($('path').value)}/whip`,{method:'POST',headers:{'Content-Type':'application/sdp'},body:pc.localDescription.sdp});
+  if(!r.ok)throw new Error('WHIP hiba: '+r.status);
+  loc=r.headers.get('Location');
+  await pc.setRemoteDescription({type:'answer',sdp:boost(await r.text())});
+}
+
+async function restart(){try{pc&&pc.close()}catch(e){} try{await connect()}catch(e){log('Hiba: '+e.message);setTimeout(()=>running&&restart(),3000)}}
+
+function stats(){
+  timer=setInterval(async()=>{
+    if(!pc)return; const s=await pc.getStats();
+    s.forEach(r=>{ if(r.type==='outbound-rtp'&&r.kind==='video'){
+      let br=0; if(last)br=(r.bytesSent-last.bytesSent)*8/((r.timestamp-last.timestamp)/1000)/1e6; last=r;
+      const codec=[...s.values()].find(c=>c.id===r.codecId)?.mimeType||'?';
+      const lim=r.qualityLimitationReason&&r.qualityLimitationReason!=='none'?'\nlimit: '+r.qualityLimitationReason:'';
+      const ms=[...s.values()].find(c=>c.type==='media-source'&&c.kind==='video');
+      const camfps=ms?Math.round(ms.framesPerSecond||0):'?';
+      const txt=`${r.frameWidth}x${r.frameHeight} @ ${Math.round(r.framesPerSecond||0)} fps · ${br.toFixed(1)} Mbps\nkamera: ${camfps} fps · ${codec} · ${r.encoderImplementation||'?'}${lim}\n${camInfo}`;
+      $('hud').textContent='● '+$('path').value+'  '+txt;
+      log('● ADÁS: '+$('path').value+'\n'+txt);
+      wsSend({type:'status',data:{streaming:true,w:r.frameWidth,h:r.frameHeight,fps:Math.round(r.framesPerSecond||0),camfps,mbps:+br.toFixed(1),enc:r.encoderImplementation||'',codec,limit:r.qualityLimitationReason||'none'}});
+      $('hint').style.display=(r.frameHeight>r.frameWidth)?'block':'none';
+    }});
+  },1000);
+}
+
+async function start(){
+  save(); wsConnect(); $('go').disabled=true;
+  goFull();
+  try{
+    log('Kamera indítása…'); await getCam();
+    try{wake=await navigator.wakeLock.request('screen')}catch(e){}
+    running=true; await connect(); stats();
+    $('go').textContent='Leállítás'; $('go').className='main stop';
+    panel.classList.remove('open');
+  }catch(e){running=false;log('Hiba: '+e.message);panel.classList.add('open')}
+  $('go').disabled=false;
+}
+async function stop(){
+  running=false; clearInterval(timer); last=null;
+  try{if(loc)await fetch(new URL(loc,location.href),{method:'DELETE'})}catch(e){}
+  try{pc&&pc.close()}catch(e){} pc=null;
+  stream&&stream.getTracks().forEach(t=>t.stop()); $('pv').srcObject=null;
+  try{wake&&wake.release()}catch(e){}
+  sender=null;$('zoom').style.display='none';clearInterval(ftimer);faceOn=false;$('cpanel').classList.remove('open');$('dark').style.display='none';
+  wsSend({type:'status',data:{streaming:false}});
+  leaveFull(); $('hud').textContent=''; $('hint').style.display='none';
+  $('go').textContent='Indítás'; $('go').className='main'; log('Leállítva.');
+}
+$('go').className='main';
+$('go').onclick=()=>running?stop():start();
+document.addEventListener('visibilitychange',async()=>{if(running&&document.visibilityState==='visible'){try{wake=await navigator.wakeLock.request('screen')}catch(e){}}});
+wsConnect();setTally('none');
+if(!window.isSecureContext)log('Figyelem: nem HTTPS, a kamera nem fog működni!');
+</script>
+</body>
+</html>

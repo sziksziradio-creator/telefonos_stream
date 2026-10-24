@@ -1,0 +1,20 @@
+{
+	auto_https disable_redirects
+}
+
+# Az Apache a 443-at használja, ezért a Caddy a 8443-on fut.
+# Cseréld a címet a szerver LAN IP-jére (ugyanaz, mint a mediamtx.yml-ben)
+https://192.168.1.8:8443 {
+	tls internal
+	handle /ws {
+		reverse_proxy 127.0.0.1:3000
+	}
+	redir /admin /admin.html
+	handle_path /cam/* {
+		reverse_proxy 127.0.0.1:8889
+	}
+	handle {
+		root * /srv/www
+		file_server
+	}
+}
